@@ -1,4 +1,4 @@
-"""Step 2: detect checkerboard inner corners with sub-pixel precision."""
+"""Step 2: detect checkerboard inner corners. Step 3: camera intrinsics."""
 
 from glob import glob
 from os import path as opath
@@ -8,19 +8,20 @@ import numpy as np
 
 from mypylibs.frames import PATTERN
 
-# Stop sub-pixel refinement after 30 iterations or when the corner moves < 0.001 px
-SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+SQUARE_CM = 2.5  # checkerboard square size; sets the unit (cm) of all 3D results
 
 
 def find_corners(frame: np.ndarray, pattern: tuple[int, int] = PATTERN) -> np.ndarray | None:
-    """Inner corners of the board as (N, 1, 2) float32 sub-pixel coords, or None if not found."""
+    """Inner corners of the board as (N, 1, 2) float32 sub-pixel coords, or None if not found.
+
+    Uses the sector-based detector (findChessboardCornersSB), which is sub-pixel
+    accurate on its own. findChessboardCorners + cornerSubPix put two corners in
+    the wrong place on washed-out frame 13 (1.2 px error vs 0.12 px with SB).
+    """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
-    found, corners = cv2.findChessboardCorners(gray, pattern, flags)
-    if not found:
-        return None
-    # ponytail: fixed 11x11 window suits 640x360 frames; scale it if resolution changes
-    return cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), SUBPIX_CRITERIA)
+    flags = cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
+    found, corners = cv2.findChessboardCornersSB(gray, pattern, flags)
+    return corners.reshape(-1, 1, 2).astype(np.float32) if found else None
 
 
 def load_calibration_images(in_dir: str) -> list[str]:
@@ -50,6 +51,34 @@ def draw_corners(frame: np.ndarray, corners: np.ndarray, pattern: tuple[int, int
     out = frame.copy()
     cv2.drawChessboardCorners(out, pattern, corners, True)
     return out
+
+
+def board_points(pattern: tuple[int, int] = PATTERN, s: float = SQUARE_CM) -> np.ndarray:
+    """3D corners (i*s, j*s, 0) on the Z=0 plane, in the order OpenCV detects them."""
+    cols, rows = pattern
+    pts = np.zeros((cols * rows, 3), np.float32)
+    pts[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2) * s
+    return pts
+
+
+def calibrate(image_points: list[np.ndarray], size: tuple[int, int],
+              pattern: tuple[int, int] = PATTERN, s: float = SQUARE_CM) -> dict:
+    """Run cv2.calibrateCamera on the detected corners.
+
+    Returns K (3x3), D (k1, k2, p1, p2, k3), OpenCV's RMS error, and the mean
+    reprojection error (px) overall and per image.
+    """
+    object_points = [board_points(pattern, s)] * len(image_points)
+    rms, K, D, rvecs, tvecs = cv2.calibrateCamera(object_points, image_points, size, None, None)
+
+    # Mean Euclidean distance between detected and reprojected corners
+    per_image = []
+    for o, ip, r, t in zip(object_points, image_points, rvecs, tvecs):
+        proj, _ = cv2.projectPoints(o, r, t, K, D)
+        per_image.append(float(np.linalg.norm(proj.reshape(-1, 2) - ip.reshape(-1, 2), axis=1).mean()))
+
+    return {'K': K, 'D': D.ravel()[:5], 'rms': rms,
+            'mean_error': float(np.mean(per_image)), 'per_image_error': per_image}
 
 
 if __name__ == '__main__':

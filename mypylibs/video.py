@@ -26,15 +26,15 @@ def preprocess_video(src: str, dst: str) -> None:
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
         raise FileNotFoundError(f'Could not open video: {src}')
+    # Ignore the phone's portrait/landscape flag and keep raw sensor orientation,
+    # so every video has the same pixel layout as the calibration video and K applies
+    cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     ok, frame = cap.read()
     if not ok:
         raise RuntimeError(f'Video has no frames: {src}')
-    # Use the decoded frame's shape: it already has phone rotation applied
     h, w = frame.shape[:2]
     size = target_size(w, h)
 

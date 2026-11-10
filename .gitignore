@@ -8,3 +8,8 @@
 *.run.xml
 *.pdf
 *.synctex.gz
+
+# Python caches / macOS
+__pycache__/
+*.pyc
+.DS_Store

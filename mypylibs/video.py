@@ -21,6 +21,20 @@ def target_size(w: int, h: int) -> tuple[int, int]:
     return int(w * scale) // 2 * 2, int(h * scale) // 2 * 2
 
 
+def read_frames(path: str) -> list:
+    """All frames of an (already pre-processed) video as BGR arrays."""
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f'Could not open video: {path}')
+    frames = []
+    ok, frame = cap.read()
+    while ok:
+        frames.append(frame)
+        ok, frame = cap.read()
+    cap.release()
+    return frames
+
+
 def preprocess_video(src: str, dst: str) -> None:
     """Downscale src to fit 640x360 and write it to dst as mp4."""
     cap = cv2.VideoCapture(src)

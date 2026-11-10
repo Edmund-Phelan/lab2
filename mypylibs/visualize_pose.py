@@ -1,15 +1,9 @@
 """Step 5 visualisation: per-pair pose overlay video and the chained camera trajectory.
 
-Usage (from the repo root, after main.py has written out/XX_K.csv and out/XX_D.csv):
-    python -m mypylibs.visualize_pose <scene_video> [camera_id]
-
-Writes out/XX_YY_pose.mp4 and out/XX_YY_trajectory.png. The video shows frame t+STEP
-(undistorted) with RANSAC inlier matches in green, outliers in red, and a few
-epipolar lines: if the pose is right, each inlier sits on its line.
+Called from main.py; writes out/XX_YY_pose.mp4 and out/XX_YY_trajectory.png. The video
+shows frame t+STEP (undistorted) with RANSAC inlier matches in green, outliers in red,
+and a few epipolar lines: if the pose is right, each inlier sits on its line.
 """
-
-import sys
-from os import path as opath
 
 import cv2
 import matplotlib
@@ -90,14 +84,12 @@ def plot_trajectory(centres: np.ndarray, dirs: np.ndarray, dst: str) -> None:
     plt.close(fig)
 
 
-def main(video: str, cam: int) -> None:
-    K = np.loadtxt(f'out/{cam:02}_K.csv', delimiter=',')
-    D = np.loadtxt(f'out/{cam:02}_D.csv', delimiter=',')
+def make_outputs(video: str, K: np.ndarray, D: np.ndarray, out_prefix: str) -> None:
+    """Write <out_prefix>_pose.mp4 and <out_prefix>_trajectory.png for one scene."""
     frames = read_frames(video)
     poses = scene_poses(frames, K, D, STEP)
-    name = opath.splitext(opath.basename(video))[0]
 
-    dst = f'out/{name}_pose.mp4'
+    dst = f'{out_prefix}_pose.mp4'
     h, w = frames[0].shape[:2]
     writer = cv2.VideoWriter(dst, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (w, h))
     for t, pose in enumerate(poses):
@@ -106,12 +98,6 @@ def main(video: str, cam: int) -> None:
     writer.release()
 
     centres, dirs = trajectory(poses)
-    plot_trajectory(centres, dirs, f'out/{name}_trajectory.png')
+    plot_trajectory(centres, dirs, f'{out_prefix}_trajectory.png')
     kept = sum(p is not None for p in poses)
-    print(f'{kept}/{len(poses)} poses kept; wrote {dst} and out/{name}_trajectory.png')
-
-
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 1)
+    print(f'{kept}/{len(poses)} poses kept; wrote {dst} and {out_prefix}_trajectory.png')

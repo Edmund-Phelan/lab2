@@ -1,19 +1,12 @@
 """Calibration video overlay: detected corners in red, board axes from the calibrated K, D.
 
-Usage (from the repo root, after main.py has written out/XX_K.csv and out/XX_D.csv):
-    python -m mypylibs.visualize <calibration_video> [camera_id] [out_video]
-
-The 20 frames chosen for calibration (in/1.png ... in/20.png) are labelled and held
-on screen briefly.
+Called from main.py. The frames chosen for calibration are labelled and held on screen briefly.
 """
-
-import sys
-from os import path as opath
 
 import cv2
 import numpy as np
 
-from mypylibs.calibration import PATTERN, SQUARE_CM, board_points, find_corners, load_calibration_images
+from mypylibs.calibration import SQUARE_CM, board_points, find_corners
 
 RED = (0, 0, 255)
 WHITE = (255, 255, 255)
@@ -46,12 +39,9 @@ def overlay(frame: np.ndarray, K: np.ndarray, D: np.ndarray) -> tuple[np.ndarray
     return out, True
 
 
-def make_video(video: str, cam: int, dst: str) -> None:
-    K = np.loadtxt(f'out/{cam:02}_K.csv', delimiter=',')
-    D = np.loadtxt(f'out/{cam:02}_D.csv', delimiter=',')
-
-    # Chosen frames, matched to video frames by exact pixel equality (PNGs are lossless)
-    chosen = {i + 1: cv2.imread(p) for i, p in enumerate(load_calibration_images('in'))}
+def make_video(video: str, K: np.ndarray, D: np.ndarray, chosen: list[int], dst: str) -> None:
+    """Overlay video; `chosen` are the frame indices used for calibration (held on screen)."""
+    chosen = {idx: n + 1 for n, idx in enumerate(chosen)}
 
     cap = cv2.VideoCapture(video)
     if not cap.isOpened():
@@ -76,13 +66,11 @@ def make_video(video: str, cam: int, dst: str) -> None:
         if not found:
             label(out, 'board not detected', (10, out.shape[0] - 12), RED)
 
-        match = next((n for n, img in chosen.items()
-                      if img is not None and img.shape == frame.shape and np.array_equal(img, frame)), None)
-        if match is None:
+        if idx not in chosen:
             writer.write(out)
         else:
             cv2.rectangle(out, (0, 0), (out.shape[1] - 1, out.shape[0] - 1), RED, 4)
-            label(out, f'calibration image {match}.png', (out.shape[1] - 230, 22), RED)
+            label(out, f'calibration image {chosen[idx]}', (out.shape[1] - 200, 22), RED)
             for _ in range(HOLD_FRAMES):
                 writer.write(out)
         idx += 1
@@ -92,9 +80,3 @@ def make_video(video: str, cam: int, dst: str) -> None:
     print(f'Board found in {found_count}/{idx} frames, wrote {dst}')
 
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    cam = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    dst = sys.argv[3] if len(sys.argv) > 3 else f'out/{cam:02}_calibration_corners.mp4'
-    make_video(sys.argv[1], cam, dst)

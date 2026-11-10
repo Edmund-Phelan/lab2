@@ -1,14 +1,9 @@
 """Scene video overlay: SIFT features and how far each moved since the previous frame.
 
-Usage (from the repo root):
-    python -m mypylibs.visualize_scene <scene_video> [out_video]
-
-Each matched feature is a dot with a line back to where it was GAP frames earlier,
+Called from main.py; writes out/XX_YY_motion.mp4. Each matched feature is a dot with a line back to where it was GAP frames earlier,
 coloured by how far it moved. With a sideways camera, near objects move more
 than far ones, so the colours preview the depth map (warm = near, cool = far).
 """
-
-import sys
 
 import cv2
 import numpy as np
@@ -90,7 +85,3 @@ def make_video(video: str, dst: str) -> None:
           f'median dx={np.median(dx):+.1f}px dy={np.median(dy):+.1f}px; wrote {dst}')
 
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    make_video(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else 'out/01_01_motion.mp4')

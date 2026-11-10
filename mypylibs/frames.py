@@ -1,7 +1,5 @@
 """Pick sharp calibration frames that show the full checkerboard."""
 
-from os import path as opath
-
 import cv2
 import numpy as np
 
@@ -15,8 +13,8 @@ def sharpness(gray: np.ndarray) -> float:
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
 
-def extract_calibration_frames(video: str, out_dir: str, n: int = 20) -> None:
-    """Write n frames to out_dir as 1.png ... n.png.
+def extract_calibration_frames(video: str, n: int = 20) -> list[tuple[int, np.ndarray]]:
+    """(frame index, frame) for n frames of the video, in time order.
 
     The video is split into n equal time windows and, from each, the sharpest
     frame where the whole checkerboard is detected is kept. Spreading the picks
@@ -64,6 +62,5 @@ def extract_calibration_frames(video: str, out_dir: str, n: int = 20) -> None:
         print(f'{missing} time windows had no board; filled with frames far from other picks')
 
     picks.sort(key=lambda c: c[0])
-    for i, (idx, sharp, frame) in enumerate(picks):
-        cv2.imwrite(opath.join(out_dir, f'{i + 1}.png'), frame)
-        print(f'{i + 1}.png <- frame {idx} (sharpness {sharp:.0f})')
+    print('Calibration frames: ' + ', '.join(str(idx) for idx, _, _ in picks))
+    return [(idx, frame) for idx, _, frame in picks]

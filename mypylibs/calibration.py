@@ -1,7 +1,6 @@
 """Step 2: detect checkerboard inner corners. Step 3: camera intrinsics."""
 
 from glob import glob
-from os import path as opath
 
 import cv2
 import numpy as np
@@ -24,26 +23,19 @@ def find_corners(frame: np.ndarray, pattern: tuple[int, int] = PATTERN) -> np.nd
     return corners.reshape(-1, 1, 2).astype(np.float32) if found else None
 
 
-def load_calibration_images(in_dir: str) -> list[str]:
-    """Paths of in/1.png ... in/N.png, in numeric order."""
-    paths = glob(opath.join(in_dir, '[0-9]*.png'))
-    return sorted(paths, key=lambda p: int(opath.splitext(opath.basename(p))[0]))
-
-
-def find_all_corners(paths: list[str], pattern: tuple[int, int] = PATTERN
-                     ) -> tuple[list[np.ndarray], tuple[int, int]]:
-    """Corners for every image where the board is found, plus the image size (w, h)."""
-    image_points, size = [], None
-    for p in paths:
-        frame = cv2.imread(p)
-        size = frame.shape[1::-1]
+def find_all_corners(frames: list[tuple[int, np.ndarray]], pattern: tuple[int, int] = PATTERN
+                     ) -> tuple[list[np.ndarray], list[int], tuple[int, int]]:
+    """Corners and frame index for every frame where the board is found, plus the image size (w, h)."""
+    image_points, used = [], []
+    for idx, frame in frames:
         corners = find_corners(frame, pattern)
         if corners is None:
-            print(f'{p}: board NOT found, skipped')
+            print(f'frame {idx}: board NOT found by the accurate detector, skipped')
             continue
         image_points.append(corners)
-    print(f'Corners found in {len(image_points)}/{len(paths)} images')
-    return image_points, size
+        used.append(idx)
+    print(f'Corners found in {len(image_points)}/{len(frames)} frames')
+    return image_points, used, frames[0][1].shape[1::-1]
 
 
 def draw_corners(frame: np.ndarray, corners: np.ndarray, pattern: tuple[int, int] = PATTERN) -> np.ndarray:
@@ -82,15 +74,18 @@ def calibrate(image_points: list[np.ndarray], size: tuple[int, int],
 
 
 if __name__ == '__main__':
-    # Self-check: every calibration image yields all 8x5 corners inside the image
-    paths = load_calibration_images('in')
-    assert paths, 'no calibration images in in/'
-    pts, (w, h) = find_all_corners(paths)
-    assert len(pts) == len(paths), 'board missed in some images'
-    for c in pts:
-        assert c.shape == (PATTERN[0] * PATTERN[1], 1, 2)
-        assert (c[..., 0] >= 0).all() and (c[..., 0] < w).all()
-        assert (c[..., 1] >= 0).all() and (c[..., 1] < h).all()
-    preview = 'out/corners_preview.png'
-    cv2.imwrite(preview, draw_corners(cv2.imread(paths[0]), pts[0]))
-    print(f'OK, preview written to {preview}')
+    # Self-check on every in/XX_calibration.mp4: all 8x5 corners found inside the image, error <= 0.5 px
+    import sys
+    from mypylibs.frames import extract_calibration_frames
+    for video in sys.argv[1:] or sorted(glob('in/[0-9][0-9]_calibration.mp4')):
+        frames = extract_calibration_frames(video)
+        pts, _, (w, h) = find_all_corners(frames)
+        assert len(pts) >= 15, f'{video}: board found in too few frames'
+        for c in pts:
+            assert c.shape == (PATTERN[0] * PATTERN[1], 1, 2)
+            assert (c[..., 0] >= 0).all() and (c[..., 0] < w).all()
+            assert (c[..., 1] >= 0).all() and (c[..., 1] < h).all()
+        err = calibrate(pts, (w, h))['mean_error']
+        print(f'{video}: mean reprojection error {err:.3f} px')
+        assert err <= 0.5, f'{video}: reprojection error over 0.5 px'
+    print('OK')

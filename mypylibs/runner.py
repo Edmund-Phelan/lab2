@@ -19,6 +19,7 @@ from mypylibs.frames import extract_calibration_frames
 from mypylibs.visualize import make_video as calibration_video
 from mypylibs.visualize_pose import make_outputs as pose_outputs
 from mypylibs.visualize_scene import make_video as motion_video
+from mypylibs.depth import make_depth_video
 
 ROOT_IN = 'in'
 ROOT_OUT = 'out'
@@ -63,3 +64,18 @@ def run_scene(video: str, K: np.ndarray, D: np.ndarray) -> None:
     print(f'--- Scene {name} ---')
     motion_video(video, opath.join(ROOT_OUT, f'{name}_motion.mp4'))
     pose_outputs(video, K, D, opath.join(ROOT_OUT, name))
+    depth_name = name.replace('_', '-', 1)
+    baseline_cm = {
+        "01_01": 0.7,  # Estimated from the laptop distance.
+        "02_01": 0.3,  # Estimated from the mug distance.
+        "03_01": 15.0,  # Estimated from the building distance.
+    }
+
+    make_depth_video(
+        video=video,
+        K=K,
+        D=D,
+        output=opath.join(ROOT_OUT, f'{depth_name}.mp4'),
+        step=10,
+        baseline_cm=baseline_cm.get(name, 0.7),  # Estimated displacement across a 10-frame pair.
+    )

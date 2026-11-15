@@ -24,13 +24,12 @@ from mypylibs.depth import make_depth_video
 ROOT_IN = 'in'
 ROOT_OUT = 'out'
 
-# Monocular poses have no scale, so the camera speed is set by hand per scene: chosen
-# so a reference object comes out at its estimated distance (0.07 cm/frame was
-# first set as "0.7 cm per 10 frames").
+# Monocular poses have no scale, so the depth step assumes a steady camera speed per
+# scene, from something of known size in it (python -m mypylibs.scale, after main.py)
 CM_PER_FRAME = {
-    '01_01': 0.07,  # laptop
-    '02_01': 0.03,  # mug
-    '03_01': 1.5,   # building
+    '01_01': 0.27,  # measured: calibration board on the desk, solvePnP
+    '02_01': 0.42,  # estimated: mug ~9.5 cm tall -> ~39 cm away
+    '03_01': 1.2,   # estimated: building ~18 m away (storey and door heights)
 }
 
 

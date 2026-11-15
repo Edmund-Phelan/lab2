@@ -1,106 +1,122 @@
 \documentclass[conference]{assets/latex/IEEEtran}
 \IEEEoverridecommandlockouts
-% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
-%Template version as of 6/27/2024
 
 \usepackage{amsmath,amssymb,amsfonts}
-\usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
+\usepackage{booktabs}
 \usepackage[backend=biber,style=numeric]{biblatex}
-\addbibresource{assets/latex/report.bib} 
+\addbibresource{assets/latex/report.bib}
 
- \graphicspath{{assets/latex/}}
+\graphicspath{{assets/latex/}}
 
 \begin{document}
 
 \title{CS6524 Computer Vision Lab. 2\\ Camera Calibration and Stereo Vision}
 
-\author{\IEEEauthorblockN{1\textsuperscript{st} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\author{\IEEEauthorblockN{Cormac Shannon}
+\IEEEauthorblockA{\textit{ID 23366303} \\
+\textit{University of Limerick}}
 \and
-\IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\IEEEauthorblockN{Eddie Phelen}
+\IEEEauthorblockA{\textit{ID 23397179} \\
+\textit{University of Limerick}}
 \and
-\IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\IEEEauthorblockN{Ellice Nelson}
+\IEEEauthorblockA{\textit{ID 23371323} \\
+\textit{University of Limerick}}
 }
 
 \maketitle
 
 \begin{abstract}
-Describe in few words the work done, the lessons learned, and results.
+We calibrated three phone cameras (Samsung Galaxy Z Fold6, iPhone 15, iPhone 15 Pro) from checkerboard videos, reaching mean reprojection errors of 0.12--0.41\,px, and used the intrinsics to estimate dense depth from a single moving camera: SIFT matches give the essential matrix and relative pose between two frames of a scene video, which are then rectified and matched with semi-global block matching. The first working version produced depth for only 5 frame pairs across the three scenes. Two causes dominated: a default distance threshold in \texttt{recoverPose} that discarded most points of a small-baseline pair, and the ambiguity between a small pan and a sideways slide. After fixing both, 213 pairs give depth maps whose depth ordering is correct in all scenes, but whose absolute scale depends on a hand-set camera speed and is the weakest part of the pipeline.
 \end{abstract}
 
-\section{Introduction}
-This document contains some examples of basic {\LaTeX} functions.
+\section{Methodology}
 
-\subsection{Lists}
+\subsection{Recording and pre-processing}
+Each member recorded a calibration video (static phone, moving board) and a scene video (static scene, sideways phone motion). All videos go through the same function: resize to fit $640\times360$ with \texttt{INTER\_AREA}, keeping the raw sensor orientation (the container's rotation flag is ignored) so that the scene frames share the pixel layout the intrinsics were estimated in.
 
-List can be bulleted\dots
-\begin{itemize}
-\item First
-\item Second
-\item Third
-\end{itemize}
+\subsection{Calibration}
+The printed board has $9\times6$ squares, i.e.\ $8\times5$ inner corners, placed at $(i s, j s, 0)$ with $s=2.5$\,cm so that all 3D results are in centimetres. The video is split into 20 equal time windows and the sharpest frame (variance of the Laplacian) with a detected board is taken from each, which spreads the board poses. Corners are found with \texttt{findChessboardCornersSB}, whose sector-based detector is already sub-pixel accurate: on one washed-out frame of camera 01, \texttt{findChessboardCorners} followed by \texttt{cornerSubPix} misplaced two corners (1.2\,px error against 0.12\,px). \texttt{calibrateCamera}~\cite{zhang2000} then gives $K$ and $D=(k_1,k_2,p_1,p_2,k_3)$ (Table~\ref{tab:calib}); the reported error is the mean Euclidean distance between detected and reprojected corners.
 
-Or enumerated
-
-\begin{enumerate}
-\item First
-\item Second
-\item Third
-\end{enumerate}
-
-\subsection{Equations}
-
-Equations can have their own environment,
-\begin{equation}
-a+b=\gamma\label{eq}
-\end{equation}
-and be reference (Equation~\ref{eq}), or can be inline and blend in the text like this: $\sum_{i=0}^{N}x_i$, like any other word.
-
-\subsection{Figures and Tables}
-
-\begin{table}
-\caption{Table Type Styles}
-\begin{center}
-\begin{tabular}{|c|c|c|c|}
-\hline
-\textbf{Table}&\multicolumn{3}{|c|}{\textbf{Table Column Head}} \\
-\cline{2-4} 
-\textbf{Head} & \textbf{\textit{Table column subhead}}& \textbf{\textit{Subhead}}& \textbf{\textit{Subhead}} \\
-\hline
-copy& More table copy$^{\mathrm{a}}$& &  \\
-\hline
-\multicolumn{4}{l}{$^{\mathrm{a}}$Sample of a Table footnote.}
+\begin{table}[t]
+\caption{Calibration results (pixels, $640\times360$; skew is 0). 01: Galaxy Z Fold6, 02: iPhone 15, 03: iPhone 15 Pro}
+\label{tab:calib}
+\centering
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Cam. & $f_x, f_y$ & $c_x, c_y$ & $k_1, k_2, k_3$ & $p_1, p_2$ & err. \\
+\midrule
+01 & 552.0, 552.0 & 321.0, 169.4 & 0.05, $-$0.30, 0.42 & $-$.005, .001 & 0.12 \\
+02 & 624.9, 623.3 & 324.4, 185.2 & 0.37, $-$2.32, 5.37 & .002, .000 & 0.41 \\
+03 & 564.5, 565.0 & 315.9, 168.6 & 0.27, $-$1.21, 2.56 & $-$.011, $-$.002 & 0.32 \\
+\bottomrule
 \end{tabular}
-\label{tab1}
-\end{center}
 \end{table}
 
-\begin{figure}
-% Uncomment the line below to include an image from a source file
-\centerline{\includegraphics{fig1.png}}
-\caption{Example of a figure caption.}
-\label{fig}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{depth_examples.png}
+\caption{Rectified first frame (top) and depth (bottom) for one pair per scene. Grey: no valid disparity. The colour scales differ per scene (5th--95th percentile).}
+\label{fig:depth}
+\end{figure*}
+
+\subsection{Relative pose between two frames}
+SIFT~\cite{lowe2004} keypoints are matched by brute force with Lowe's ratio test (0.75). At $640\times360$ the default contrast threshold (0.04) found only ${\sim}250$ keypoints per frame, so we lowered it to 0.02, which roughly doubles that. Matched points are undistorted (re-projected with $K$, so they stay in pixels) and passed to \texttt{findEssentialMat} (5-point RANSAC~\cite{nister2004}, 1\,px threshold). We estimate $E$ directly rather than $F$ followed by $E=K^\top F K$: with $K$ known, $E$ has 5 unknowns instead of 7, and on scene 01 it gave more consistent translation directions between neighbouring pairs (0.90 against 0.79 agreement). $F=K^{-\top}EK^{-1}$ is kept for drawing epipolar lines. \texttt{recoverPose} picks the $(R,t)$ decomposition that puts the points in front of both cameras; $t$ is a unit vector.
+
+Consecutive frames move less than 1\,px, so the second frame of each pair is not $t+1$: for every frame $t$, the partner is the first later frame whose matched features moved at least 10\,px (median), within 90 frames. A pose is rejected if the median motion is below 3\,px, if fewer than half the inliers triangulate in front of both cameras, or if the flow left after undoing $R$ does not point in one direction for at least 90\% of the inliers (Section~\ref{sec:ambiguity}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\columnwidth]{trajectory_01_01.png}
+\caption{Camera path of 01\_01 from chained pairs (top view), with each hop scaled by its gap in frames. Arrows: viewing direction.}
+\label{fig:traj}
 \end{figure}
 
-They appear by default on top of the text, and you reference like this: Figure~\ref{fig} and Table~\ref{tab1}.
+\subsection{Dense depth}
+Each pair is rectified with \texttt{stereoRectify} (\texttt{CALIB\_ZERO\_DISPARITY}, $\alpha=0$) and \texttt{initUndistortRectifyMap}/\texttt{remap}. Pairs with more than $10^\circ$ of rotation, or whose rectification rescales the focal length by more than $2\times$ (strong forward motion), are skipped. Where $t$ is mostly vertical, the rectified images are transposed so that the epipolar lines become rows. Disparity comes from StereoSGBM~\cite{hirschmuller2008} (3-way mode, $7\times7$ window, 96 disparities, uniqueness 15, left--right check 1\,px, speckle filter), followed by a $5\times5$ median filter. Depth is
+\begin{equation}
+Z = \frac{f\,B}{d} = \frac{-P_2[0,3]}{d},
+\end{equation}
+where $P_2$ is the second rectified projection matrix, which already contains $f\cdot B$ ($P_2[1,3]$ for vertical pairs). The translation from \texttt{recoverPose} has no scale, so $B$ is set by assuming the phone moves at a constant speed, hand-picked per scene (0.07, 0.03 and 1.5\,cm/frame) so that a reference object (laptop, mug, building) looked about right: $B=v\,(t_2-t_1)$. The output video shows each pair's depth with a colour bar in centimetres; frames without a usable pair keep the last depth map, labelled with its frame numbers.
 
-\subsection{Citations}
+\section{Results}
 
-If you need to cite external sources, use the \texttt{assets/latex/report.bib} file. As an example, here's how you cite the textbook~\cite{foundationsCVbook}.
+\begin{table}[t]
+\caption{Pose and depth per scene}
+\label{tab:scenes}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Scene & frames & poses & depth (first version) & median gap & coverage \\
+\midrule
+01\_01 & 173 & 77 & 75 (2) & 4 & 0.57 \\
+02\_01 & 281 & 139 & 112 (1) & 14 & 0.40 \\
+03\_01 & 205 & 54 & 26 (2) & 52 & 0.57 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:scenes} counts the pairs that pass each stage; ``coverage'' is the median fraction of pixels with a valid depth. Fig.~\ref{fig:depth} shows one pair per scene. In all three the depth ordering is right: the laptop screen and mug are nearest, the window frame is further, and in 03\_01 the building wall is a nearly constant plane with the trees and car park behind it. On scene 01\_01, 75 of the 77 kept poses have $t\approx(-1,0,0)$, consistent with the phone sliding right, and chaining the pairs gives a smooth sideways path (Fig.~\ref{fig:traj}).
+
+\section{Discussion and failure analysis}
+
+\subsubsection{Points ``at infinity''}
+The first version kept 2, 1 and 2 pairs (Table~\ref{tab:scenes}) even though matching was fine. \texttt{recoverPose} only counts a point as in front of the cameras if its depth is below \texttt{distanceThresh}, by default 50 baselines. With a baseline of a few millimetres most of the scene is further than that, so on a typical pair of 01\_01 only 45 of 224 inliers counted and our ``at least half in front'' test rejected a correct pose. Raising the threshold to $10^4$ gave 177 of 224, the same as our own triangulation.
+
+\subsubsection{Pan or slide?}\label{sec:ambiguity}
+Once those poses were accepted, $t$ switched between $+x$ and $-x$ on neighbouring pairs of 01\_01 although every feature moved left. With a narrow field of view and a few pixels of motion, a slight pan explains the flow almost as well as a sideways slide, and the solver returns a wrong $R$ together with a flipped $t$. Flipping $t$ alone does not help, because the wrong $R$ is self-consistent with it. Instead we undo $R$ on the second frame's points: for a pure translation and positive depth, the remaining flow must all point the same way. On 01\_01, pairs whose $t$ matched the flow direction mostly scored above 95\% agreement and flipped ones 50--85\%, so we reject below 90\%. This cut the usable pairs of 01\_01 from 141 to 75 but removed almost all inconsistent ones; two survive, both where the phone turned by ${\sim}2^\circ$.
+
+\subsubsection{Scale}
+The weakest part is $B$. A single moving camera recovers $t$ only up to scale, and the per-scene speeds were guessed; in Fig.~\ref{fig:depth} the mug of 02\_01 comes out ${\sim}3$\,cm away, which is clearly wrong even if the ordering is right. Assuming constant speed also makes pairs with different gaps inconsistent when the hand speeds up or slows down. Measuring the distance to one object per scene (or sliding along a ruler) would fix the absolute scale; propagating relative scale between overlapping pairs by triangulating shared points would remove the constant-speed assumption.
+
+\subsubsection{Recording}
+Camera 02's board was detected in only 57 of 161 calibration frames, all between frames 14 and 90, so 19 views from a narrow range of poses fit $k_3=5.37$: low reprojection error, but a distortion polynomial that is unlikely to hold near the image corners. A slower recording with the board reaching the corners would constrain it better. Scene 03\_01 looks at a building tens of metres away while the phone barely moves (under 10\,px of flow in 60 frames), so pairs need gaps of ${\sim}50$ frames and only 26 give depth; 02\_01 mixes horizontal, vertical and forward motion, and 27 pairs are skipped for forward motion. Glass, the uniform wall and the white desk leave holes in the disparity. Given more time we would re-record with a longer, steadier slide, fix the scale as above, and fuse depth over several pairs per frame instead of showing one.
 
 \printbibliography
 

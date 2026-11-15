@@ -24,6 +24,15 @@ from mypylibs.depth import make_depth_video
 ROOT_IN = 'in'
 ROOT_OUT = 'out'
 
+# Monocular poses have no scale, so the camera speed is set by hand per scene: chosen
+# so a reference object comes out at its estimated distance (0.07 cm/frame was
+# first set as "0.7 cm per 10 frames").
+CM_PER_FRAME = {
+    '01_01': 0.07,  # laptop
+    '02_01': 0.03,  # mug
+    '03_01': 1.5,   # building
+}
+
 
 def cameras() -> list[str]:
     """Camera ids ('01', '02', ...) that have a calibration video."""
@@ -65,19 +74,10 @@ def run_scene(video: str, K: np.ndarray, D: np.ndarray) -> None:
     motion_video(video, opath.join(ROOT_OUT, f'{name}_motion.mp4'))
     pose_outputs(video, K, D, opath.join(ROOT_OUT, name))
     depth_name = name.replace('_', '-', 1)
-    # Monocular poses have no scale, so the camera speed is set by hand per scene: chosen
-    # so a reference object comes out at its measured distance (0.07 cm/frame was
-    # first set as "0.7 cm per 10 frames").
-    cm_per_frame = {
-        "01_01": 0.07,  # laptop
-        "02_01": 0.03,  # mug
-        "03_01": 1.5,   # building
-    }
-
     make_depth_video(
         video=video,
         K=K,
         D=D,
         output=opath.join(ROOT_OUT, f'{depth_name}.mp4'),
-        cm_per_frame=cm_per_frame.get(name, 0.07),
+        cm_per_frame=CM_PER_FRAME.get(name, 0.07),
     )

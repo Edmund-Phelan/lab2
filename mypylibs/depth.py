@@ -1,4 +1,9 @@
-"""Step 6 using the existing SIFT poses and 10-frame spacing."""
+"""Step 6: dense depth from each frame and a later frame of the same scene video.
+
+The partner frame is picked by depth_pairs (mypylibs/pose.py) so the features
+moved enough for useful disparity. t from recoverPose is a unit vector; its length
+in cm is taken as cm_per_frame * gap, i.e. assuming the camera slides at a steady speed.
+"""
 
 import csv
 import os
@@ -10,8 +15,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mypylibs.pose import rotation_deg, scene_poses
+from mypylibs.pose import depth_pairs, rotation_deg
 from mypylibs.video import read_frames
+
+
+# Pairs are picked at ~10 px median motion, so near objects can move several times that
+NUM_DISPARITIES = 96
+BLOCK = 7  # SGBM window; 5 left too many speckles on the low-texture desk and walls
 
 
 def compute_depth(first, second, K, D, R, t):
@@ -27,8 +37,9 @@ def compute_depth(first, second, K, D, R, t):
         alpha=0,
     )
 
-    if abs(P2[1, 3]) >= abs(P2[0, 3]):
-        raise ValueError("Vertical stereo geometry")
+    # A mostly vertical t gives vertical epipolar lines; transposing both images
+    # turns them into rows, which is all StereoSGBM can search along.
+    vertical = abs(P2[1, 3]) > abs(P2[0, 3])
 
     if not np.isfinite(P1).all() or not 0.5 < P1[0, 0] / K[0, 0] < 2:
         raise ValueError("Extreme rectification zoom")
@@ -45,37 +56,47 @@ def compute_depth(first, second, K, D, R, t):
             cv2.remap(frame, *maps, cv2.INTER_LINEAR)
         )
 
-    # With equal rectified principal points, depth = -P2[0, 3] / disparity.
-    numerator = -P2[0, 3]
-    minimum = 0 if numerator > 0 else -63
+    # With equal rectified principal points, depth = -P2[0, 3] / disparity
+    # (P2[1, 3] for vertical pairs).
+    numerator = -P2[1, 3] if vertical else -P2[0, 3]
+    minimum = 0 if numerator > 0 else 1 - NUM_DISPARITIES
 
     matcher = cv2.StereoSGBM_create(
         minDisparity=minimum,
-        numDisparities=64,
-        blockSize=5,
-        P1=200,
-        P2=800,
+        numDisparities=NUM_DISPARITIES,
+        blockSize=BLOCK,
+        P1=8 * BLOCK ** 2,
+        P2=32 * BLOCK ** 2,
         disp12MaxDiff=1,
-        uniquenessRatio=10,
-        speckleWindowSize=50,
+        uniquenessRatio=15,
+        speckleWindowSize=100,
         speckleRange=2,
+        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
     )
 
     gray = [
         cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         for frame in rectified
     ]
+    if vertical:
+        gray = [g.T.copy() for g in gray]
+        roi1, roi2 = [(y, x, h, w) for x, y, w, h in (roi1, roi2)]
     disparity = matcher.compute(*gray).astype(np.float32) / 16.0
 
     x, y, w, h = cv2.getValidDisparityROI(
-        roi1, roi2, minimum, 64, 5
+        roi1, roi2, minimum, NUM_DISPARITIES, BLOCK
     )
 
-    valid = np.zeros((height, width), dtype=bool)
+    valid = np.zeros(disparity.shape, dtype=bool)
     valid[y:y + h, x:x + w] = True
     valid &= disparity >= minimum
+    # Median filter removes isolated mismatches without blurring depth edges much
+    disparity = cv2.medianBlur(disparity, 5)
     valid &= disparity * numerator > 0
     valid &= np.abs(disparity) >= 0.5
+
+    if vertical:
+        disparity, valid = disparity.T, valid.T
 
     if valid.mean() < 0.05:
         raise ValueError("Less than 5 percent usable depth")
@@ -87,10 +108,10 @@ def compute_depth(first, second, K, D, R, t):
 
 
 
-def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
+def make_depth_video(video, K, D, output, cm_per_frame):
     frames = read_frames(video)
-    if step < 1 or len(frames) <= step:
-        raise ValueError("Not enough frames for the requested gap")
+    if len(frames) < 2:
+        raise ValueError("Not enough frames for a stereo pair")
 
     cap = cv2.VideoCapture(video)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -98,25 +119,25 @@ def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
 
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
-    poses = scene_poses(frames, K, D, step=step)
+    poses = depth_pairs(frames, K, D)
     records = []
     results = {}
 
     for i, pose in enumerate(poses):
-        j = i + step
+        j = pose["partner"] if pose is not None else ""
         status = "Pose unavailable"
         coverage = 0.0
 
         if pose is not None:
             try:
                 t = pose["t"]
-                t_cm = t * (baseline_cm / np.linalg.norm(t))
+                t_cm = t * (cm_per_frame * (j - i) / np.linalg.norm(t))
 
                 image, depth = compute_depth(
                     frames[i], frames[j],
                     K, D, pose["R"], t_cm,
                 )
-                results[j] = (image, depth)
+                results[i] = (image, depth, j)
                 coverage = float(np.isfinite(depth).mean())
                 status = "OK"
             except ValueError as exc:
@@ -139,9 +160,9 @@ def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
     # Keep the same display scale throughout the video.
     samples = np.concatenate([
         depth[np.isfinite(depth)][::20]
-        for _, depth in results.values()
+        for _, depth, _ in results.values()
     ])
-    low, high = np.percentile(samples, [2, 98])
+    low, high = np.percentile(samples, [5, 95])
     high = max(high, low + 1e-6)
 
     fig, axes = plt.subplots(
@@ -163,7 +184,7 @@ def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
         label="Estimated depth (cm)",
     )
     fig.suptitle(
-        f"Stereo depth | assumed baseline {baseline_cm:g} cm across {step} frames"
+        f"Stereo depth | assumed camera speed {cm_per_frame:g} cm/frame"
     )
     for ax in axes:
         ax.axis("off")
@@ -172,24 +193,27 @@ def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
     first_valid = min(results)
 
     try:
-        for j in range(step, len(frames)):
-            image, depth = results.get(
-                j, (frames[j - step], blank)
-            )
+        # Frames without a usable pair keep showing the last one, labelled with its frames,
+        # so the video doesn't flicker to blank on every rejected pair
+        shown = None
+        for i in range(len(frames)):
+            if i in results:
+                shown = i
 
-            scene_plot.set_data(
-                cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            )
-            depth_plot.set_data(depth)
-
-            axes[0].set_title(
-                "Rectified first frame"
-                if j in results else "Original first frame"
-            )
-            axes[1].set_title(
-                f"Frames {j - step} to {j}"
-                if j in results else "Depth unavailable"
-            )
+            if shown is None:
+                scene_plot.set_data(cv2.cvtColor(frames[i], cv2.COLOR_BGR2RGB))
+                depth_plot.set_data(blank)
+                axes[0].set_title(f"Frame {i}")
+                axes[1].set_title("Depth unavailable")
+            else:
+                image, depth, j = results[shown]
+                scene_plot.set_data(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                depth_plot.set_data(depth)
+                axes[0].set_title(f"Frame {shown}, rectified")
+                held = "" if shown == i else f", held at frame {i}"
+                axes[1].set_title(
+                    f"Frames {shown} to {j} (baseline {cm_per_frame * (j - shown):.1f} cm){held}"
+                )
 
             fig.canvas.draw()
             rgba = np.asarray(fig.canvas.buffer_rgba())
@@ -208,7 +232,7 @@ def make_depth_video(video, K, D, output, step=10, baseline_cm=None):
 
             writer.write(video_frame)
 
-            if j == first_valid:
+            if i == first_valid:
                 fig.savefig(
                     output_base + "_example.png", dpi=150
                 )
